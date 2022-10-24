@@ -1,0 +1,31 @@
+# See https://github.com/rust-lang/rustfmt/blob/master/Configurations.md
+# for actual up-to-date config options.
+
+edition = "2018"
+
+binop_separator = "Back"
+
+match_arm_blocks = false
+match_block_trailing_comma = true
+
+hard_tabs = true
+tab_spaces = 4
+
+blank_lines_upper_bound = 1
+
+use_field_init_shorthand = true
+
+# TODO: fix this (it doesn't work)
+# Try to mess with width_heuristics
+# https://github.com/rust-lang/rustfmt/blob/master/Configurations.md#width_heuristics
+struct_lit_width = 50
+struct_lit_single_line = true
+struct_variant_width = 50
+
+wrap_comments = true
+
+# Not supported anymore,
+# and "Block" seems better since it doesn't align with spaces
+# 
+# struct_lit_style = "Visual"
+# struct_lit_multiline_style = "PreferSingle"
