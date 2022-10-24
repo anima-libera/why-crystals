@@ -1,4 +1,4 @@
-use sdl2::event::Event;
+use sdl2::event::{Event, WindowEvent};
 use sdl2::image::LoadSurface;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::{Color, PixelFormatEnum};
@@ -154,7 +154,16 @@ impl ScreenGrid {
 		ScreenGrid { tiles, grid_wh, tile_wh }
 	}
 
+	fn resize_grid(&mut self, new_grid_wh: (u32, u32)) {
+		self.grid_wh = new_grid_wh;
+		self.tiles = std::iter::repeat(ScreenTile::new())
+			.take((self.grid_wh.0 * self.grid_wh.1) as usize)
+			.collect();
+	}
+
 	fn tile_index(&self, xy: (u32, u32)) -> usize {
+		assert!(xy.0 < self.grid_wh.0);
+		assert!(xy.1 < self.grid_wh.1);
 		(xy.0 * self.grid_wh.1 + xy.1) as usize
 	}
 
@@ -166,6 +175,12 @@ impl ScreenGrid {
 	fn tile_mut(&mut self, xy: (u32, u32)) -> &mut ScreenTile {
 		let tile_index = self.tile_index(xy);
 		&mut self.tiles[tile_index]
+	}
+
+	fn clear(&mut self) {
+		self.tiles = std::iter::repeat(ScreenTile::new())
+			.take((self.grid_wh.0 * self.grid_wh.1) as usize)
+			.collect();
 	}
 
 	fn grid_coords_to_rect(&self, xy: (u32, u32)) -> Rect {
@@ -349,24 +364,35 @@ pub fn main() {
 
 	let mut screen_grid = ScreenGrid::new((30, 30), (16, 16));
 
-	screen_grid.darw_text("abcdefghijklmnopqrstuvwxyz".into(), (1, 1));
-	screen_grid.darw_text(
-		RichText::from("abcdef")
-			+ RichText::from("ghijkl").fg_color(Color::RGB(240, 40, 5))
-			+ RichText::from("mnopqr").bg_color(Color::RGB(10, 40, 150))
-			+ RichText::from("stuvwx")
-				.fg_color(Color::RGB(240, 40, 5))
-				.bg_color(Color::RGB(10, 40, 150))
-			+ (RichText::from("y") + RichText::from("z")).fg_color(Color::RGB(10, 210, 40)),
-		(1, 2),
-	);
+	let mut iteration_number = -1;
+	let mut test_cursor_coords: (u32, u32) = (1, 4);
 
 	let mut event_pump = sdl_context.event_pump().unwrap();
 	'gameloop: loop {
+		iteration_number += 1;
+
 		for event in event_pump.poll_iter() {
 			match event {
 				Event::Quit { .. } | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
 					break 'gameloop;
+				},
+				Event::Window { win_event: WindowEvent::Resized(new_w, new_h), .. } => {
+					screen_grid.resize_grid((
+						new_w as u32 / screen_grid.tile_wh.0,
+						new_h as u32 / screen_grid.tile_wh.1,
+					));
+				},
+				Event::KeyDown { keycode: Some(Keycode::Up), .. } => {
+					test_cursor_coords.1 -= 1;
+				},
+				Event::KeyDown { keycode: Some(Keycode::Right), .. } => {
+					test_cursor_coords.0 += 1;
+				},
+				Event::KeyDown { keycode: Some(Keycode::Down), .. } => {
+					test_cursor_coords.1 += 1;
+				},
+				Event::KeyDown { keycode: Some(Keycode::Left), .. } => {
+					test_cursor_coords.0 -= 1;
 				},
 				_ => {},
 			}
@@ -374,6 +400,27 @@ pub fn main() {
 
 		window_canvas.set_draw_color(COLOR_BG);
 		window_canvas.clear();
+
+		screen_grid.clear();
+
+		screen_grid.darw_text("abcdefghijklmnopqrstuvwxyz".into(), (1, 1));
+		screen_grid.darw_text(
+			RichText::from("abcdef")
+				+ RichText::from("ghijkl").fg_color(Color::RGB(240, 40, 5))
+				+ RichText::from("mnopqr").bg_color(Color::RGB(10, 40, 150))
+				+ RichText::from("stuvwx")
+					.fg_color(Color::RGB(240, 40, 5))
+					.bg_color(Color::RGB(10, 40, 150))
+				+ (RichText::from("y") + RichText::from("z")).fg_color(Color::RGB(10, 210, 40)),
+			(1, 2),
+		);
+		screen_grid
+			.tile_mut((1 + iteration_number as u32 % 26, 3))
+			.sprite = '@' as SpriteIndex;
+		screen_grid.tile_mut(test_cursor_coords).sprite = '@' as SpriteIndex;
+		if iteration_number % 100 < 50 {
+			screen_grid.tile_mut(test_cursor_coords).bg_color = Color::RGB(0, 0, 200);
+		}
 
 		screen_grid.draw_to_canvas(&mut window_canvas, &mut char_sprite_sheet);
 
