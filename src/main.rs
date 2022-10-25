@@ -5,7 +5,7 @@ use sdl2::pixels::{Color, PixelFormatEnum};
 use sdl2::rect::Rect;
 use sdl2::render::{BlendMode, Canvas, RenderTarget, Texture, TextureCreator};
 use sdl2::surface::Surface;
-use sdl2::video::WindowContext;
+use sdl2::video::{Window, WindowContext};
 
 fn map_surface_pixels(surface: &Surface, mut f: impl FnMut(Color) -> Color) -> Surface<'static> {
 	let mut new_surface = surface.convert_format(PixelFormatEnum::RGBA8888).unwrap();
@@ -50,18 +50,18 @@ fn map_surface_pixels(surface: &Surface, mut f: impl FnMut(Color) -> Color) -> S
 ///
 /// If the sheet texture is loaded from a file, such file can be obtained from
 /// [the Dwarf Fortress wiki tileset repo](https://dwarffortresswiki.org/Tileset_repository).
-struct CharSpriteSheet<'a> {
-	texture: Texture<'a>,
+struct CharSpriteSheet {
+	texture: Texture,
 	grid_wh: (u32, u32),
 	tile_wh: (u32, u32),
 }
 
-impl<'a> CharSpriteSheet<'a> {
+impl CharSpriteSheet {
 	fn from_filepath(
 		filepath: &str,
 		tile_wh: (u32, u32),
-		texture_creator: &'a TextureCreator<WindowContext>,
-	) -> CharSpriteSheet<'a> {
+		texture_creator: &TextureCreator<WindowContext>,
+	) -> CharSpriteSheet {
 		let raw_surface = Surface::from_file(filepath).unwrap();
 		let pink_and_black_to_transparent = |color| {
 			if matches!(
@@ -81,7 +81,7 @@ impl<'a> CharSpriteSheet<'a> {
 		CharSpriteSheet::from_texture(texture, tile_wh)
 	}
 
-	fn from_texture(texture: Texture<'a>, tile_wh: (u32, u32)) -> CharSpriteSheet {
+	fn from_texture(texture: Texture, tile_wh: (u32, u32)) -> CharSpriteSheet {
 		let texture_query = texture.query();
 		let texture_wh = (texture_query.width, texture_query.height);
 		assert!(texture_wh.0 % tile_wh.0 == 0);
@@ -91,6 +91,7 @@ impl<'a> CharSpriteSheet<'a> {
 	}
 
 	fn char_index_to_rect(&self, char_index: u32) -> Rect {
+		assert!(char_index < self.grid_wh.0 * self.grid_wh.1);
 		let grid_xy = (char_index % self.grid_wh.0, char_index / self.grid_wh.1);
 		let xy = (grid_xy.0 * self.tile_wh.0, grid_xy.1 * self.tile_wh.1);
 		Rect::new(xy.0 as i32, xy.1 as i32, self.tile_wh.0, self.tile_wh.1)
@@ -331,99 +332,127 @@ impl ScreenGrid {
 	}
 }
 
-pub fn main() {
-	let sdl_context = sdl2::init().unwrap();
-	let video_subsystem = sdl_context.video().unwrap();
-	let _sdl_image_context = sdl2::image::init(sdl2::image::InitFlag::all()).unwrap();
+struct Game {
+	sdl_context: sdl2::Sdl,
+	_video_subsystem: sdl2::VideoSubsystem,
+	_sdl_image_context: sdl2::image::Sdl2ImageContext,
+	window_canvas: Canvas<Window>,
+	char_sprite_sheet: CharSpriteSheet,
+	screen_grid: ScreenGrid,
+	iteration_number: u32,
+}
 
-	let mut window_canvas = video_subsystem
-		.window("Why Crystals ?", 1200, 600)
-		.position_centered()
-		.maximized()
-		.resizable()
-		.build()
-		.unwrap()
-		.into_canvas()
-		.present_vsync()
-		.accelerated()
-		.build()
-		.unwrap();
-	window_canvas.set_blend_mode(BlendMode::Blend);
-	let texture_creator = window_canvas.texture_creator();
+impl Game {
+	fn new() -> Game {
+		let sdl_context = sdl2::init().unwrap();
+		let video_subsystem = sdl_context.video().unwrap();
+		let sdl_image_context = sdl2::image::init(sdl2::image::InitFlag::all()).unwrap();
 
-	// You can get more of these from
-	// [the Dwarf Fortress wiki tileset repo](https://dwarffortresswiki.org/Tileset_repository).
-	let char_sprite_sheet_filepath = "assets/Pastiche_8x8.png";
-	let char_sprite_sheet_tile_wh = (8, 8);
+		let mut window_canvas = video_subsystem
+			.window("Why Crystals ?", 1200, 600)
+			.position_centered()
+			.maximized()
+			.resizable()
+			.build()
+			.unwrap()
+			.into_canvas()
+			.present_vsync()
+			.accelerated()
+			.build()
+			.unwrap();
+		window_canvas.set_blend_mode(BlendMode::Blend);
+		let texture_creator = window_canvas.texture_creator();
 
-	let mut char_sprite_sheet = CharSpriteSheet::from_filepath(
-		char_sprite_sheet_filepath,
-		char_sprite_sheet_tile_wh,
-		&texture_creator,
-	);
+		// You can get more of these from
+		// [the Dwarf Fortress wiki tileset repo](https://dwarffortresswiki.org/Tileset_repository).
+		let char_sprite_sheet_filepath = "assets/Pastiche_8x8.png";
+		let char_sprite_sheet_tile_wh = (8, 8);
 
-	let mut screen_grid = ScreenGrid::new((30, 30), (16, 16));
-
-	let mut iteration_number = -1;
-	let mut test_cursor_coords: (u32, u32) = (1, 4);
-
-	let mut event_pump = sdl_context.event_pump().unwrap();
-	'gameloop: loop {
-		iteration_number += 1;
-
-		for event in event_pump.poll_iter() {
-			match event {
-				Event::Quit { .. } | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
-					break 'gameloop;
-				},
-				Event::Window { win_event: WindowEvent::Resized(new_w, new_h), .. } => {
-					screen_grid.resize_grid((
-						new_w as u32 / screen_grid.tile_wh.0,
-						new_h as u32 / screen_grid.tile_wh.1,
-					));
-				},
-				Event::KeyDown { keycode: Some(Keycode::Up), .. } => {
-					test_cursor_coords.1 -= 1;
-				},
-				Event::KeyDown { keycode: Some(Keycode::Right), .. } => {
-					test_cursor_coords.0 += 1;
-				},
-				Event::KeyDown { keycode: Some(Keycode::Down), .. } => {
-					test_cursor_coords.1 += 1;
-				},
-				Event::KeyDown { keycode: Some(Keycode::Left), .. } => {
-					test_cursor_coords.0 -= 1;
-				},
-				_ => {},
-			}
-		}
-
-		window_canvas.set_draw_color(COLOR_BG);
-		window_canvas.clear();
-
-		screen_grid.clear();
-
-		screen_grid.darw_text("abcdefghijklmnopqrstuvwxyz".into(), (1, 1));
-		screen_grid.darw_text(
-			RichText::from("abcdef")
-				+ RichText::from("ghijkl").fg_color(Color::RGB(240, 40, 5))
-				+ RichText::from("mnopqr").bg_color(Color::RGB(10, 40, 150))
-				+ RichText::from("stuvwx")
-					.fg_color(Color::RGB(240, 40, 5))
-					.bg_color(Color::RGB(10, 40, 150))
-				+ (RichText::from("y") + RichText::from("z")).fg_color(Color::RGB(10, 210, 40)),
-			(1, 2),
+		let char_sprite_sheet = CharSpriteSheet::from_filepath(
+			char_sprite_sheet_filepath,
+			char_sprite_sheet_tile_wh,
+			&texture_creator,
 		);
-		screen_grid
-			.tile_mut((1 + iteration_number as u32 % 26, 3))
-			.sprite = '@' as SpriteIndex;
-		screen_grid.tile_mut(test_cursor_coords).sprite = '@' as SpriteIndex;
-		if iteration_number % 100 < 50 {
-			screen_grid.tile_mut(test_cursor_coords).bg_color = Color::RGB(0, 0, 200);
+
+		let screen_grid = ScreenGrid::new((30, 30), (16, 16));
+
+		let iteration_number: u32 = 0;
+
+		Game {
+			sdl_context,
+			_video_subsystem: video_subsystem,
+			_sdl_image_context: sdl_image_context,
+			window_canvas,
+			char_sprite_sheet,
+			screen_grid,
+			iteration_number,
 		}
-
-		screen_grid.draw_to_canvas(&mut window_canvas, &mut char_sprite_sheet);
-
-		window_canvas.present();
 	}
+
+	fn run(&mut self) {
+		let mut event_pump = self.sdl_context.event_pump().unwrap();
+		'gameloop: loop {
+			self.iteration_number += 1;
+
+			for event in event_pump.poll_iter() {
+				match event {
+					Event::Quit { .. } | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
+						break 'gameloop;
+					},
+					Event::Window { win_event: WindowEvent::Resized(new_w, new_h), .. } => {
+						self.screen_grid.resize_grid((
+							new_w as u32 / self.screen_grid.tile_wh.0,
+							new_h as u32 / self.screen_grid.tile_wh.1,
+						));
+					},
+					/*
+					Event::KeyDown { keycode: Some(Keycode::Up), .. } => {
+						obj_table.get_mut(player_id).unwrap().loc_mut().xy.1 -= 1;
+					},
+					Event::KeyDown { keycode: Some(Keycode::Right), .. } => {
+						obj_table.get_mut(player_id).unwrap().loc_mut().xy.0 += 1;
+					},
+					Event::KeyDown { keycode: Some(Keycode::Down), .. } => {
+						obj_table.get_mut(player_id).unwrap().loc_mut().xy.1 += 1;
+					},
+					Event::KeyDown { keycode: Some(Keycode::Left), .. } => {
+						obj_table.get_mut(player_id).unwrap().loc_mut().xy.0 -= 1;
+					},
+					*/
+					_ => {},
+				}
+			}
+
+			self.window_canvas.set_draw_color(COLOR_BG);
+			self.window_canvas.clear();
+
+			self.screen_grid.clear();
+
+			self.screen_grid
+				.darw_text("abcdefghijklmnopqrstuvwxyz".into(), (1, 1));
+			self.screen_grid.darw_text(
+				RichText::from("abcdef")
+					+ RichText::from("ghijkl").fg_color(Color::RGB(240, 40, 5))
+					+ RichText::from("mnopqr").bg_color(Color::RGB(10, 40, 150))
+					+ RichText::from("stuvwx")
+						.fg_color(Color::RGB(240, 40, 5))
+						.bg_color(Color::RGB(10, 40, 150))
+					+ (RichText::from("y") + RichText::from("z")).fg_color(Color::RGB(10, 210, 40)),
+				(1, 2),
+			);
+
+			self.screen_grid
+				.tile_mut((1 + self.iteration_number as u32 % 26, 3))
+				.sprite = '@' as SpriteIndex;
+
+			self.screen_grid
+				.draw_to_canvas(&mut self.window_canvas, &mut self.char_sprite_sheet);
+
+			self.window_canvas.present();
+		}
+	}
+}
+
+fn main() {
+	Game::new().run();
 }
